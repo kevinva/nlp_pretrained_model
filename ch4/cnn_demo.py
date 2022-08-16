@@ -1,3 +1,10 @@
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+
+
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,7 +21,7 @@ from helper.utils import load_sentence_polarity
 from tqdm.auto import tqdm
 
 
-class BowDataset(Dataset):
+class CnnDataset(Dataset):
 
     def __init__(self, data):
         self.data = data
@@ -25,30 +32,31 @@ class BowDataset(Dataset):
     def __getitem__(self, i):
         return self.data[i]
 
-
 def collate_fn(examples):
     inputs = [torch.tensor(ex[0]) for ex in examples]
     targets = torch.tensor([ex[1] for ex in examples], dtype=torch.long)
-    offsets = [0] + [i.shape[0] for i in inputs]
-    offsets = torch.tensor(offsets[:-1]).cumsum(dim=0)
-    inputs = torch.cat(inputs)
-    return inputs, offsets, targets
+    # 对batch内的样本进行padding，使其具有相同长度
+    inputs = pad_sequence(inputs, batch_first=True) # 妙！ 竟然可以对list中每个tensor进行pad
+    return inputs, targets
 
 
-class MLP(nn.Module):
+class CNN(nn.Module):
 
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, num_class):
-        super(MLP, self).__init__()
-        self.embedding = nn.EmbeddingBag(vocab_size, embedding_dim)
-        self.linear1 = nn.Linear(embedding_dim, hidden_dim)
+    def __init__(self, vocab_size, embedding_dim, filter_size, num_filter, num_class):
+        super(CNN, self).__init__()
+
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.conv1d = nn.Conv1d(embedding_dim, num_filter, filter_size, padding=1)
         self.activate = F.relu
-        self.linear2 = nn.Linear(hidden_dim, num_class)
+        self.linear = nn.Linear(num_filter, num_class)
 
-    def forward(self, inputs, offsets):
-        embedding = self.embedding(inputs, offsets)
-        hidden = self.activate(self.linear1(embedding))
-        outputs = self.linear2(hidden)
+    def forward(self, inputs):
+        embedding = self.embedding(inputs)
+        convolution = self.activate(self.conv1d(embedding.permute(0, 2, 1)))  # permute? 一维卷积是对词embedding的每一个维度进行卷积，所以转成这种形式
+        pooling = F.max_pool1d(convolution, kernel_size=convolution.shape[2])
+        outputs = self.linear(pooling.squeeze(dim=2))
         log_probs = F.log_softmax(outputs, dim=1)
+
         return log_probs
 
 
@@ -58,28 +66,30 @@ hidden_dim = 256
 num_class = 2
 batch_size = 32
 num_epoch = 5
+filter_size = 3
+num_filter = 100
 
 # 加载数据
 train_data, test_data, vocab = load_sentence_polarity()
-train_dataset = BowDataset(train_data)
-test_dataset = BowDataset(test_data)
+train_dataset = CnnDataset(train_data)
+test_dataset = CnnDataset(test_data)
 train_data_loader = DataLoader(train_dataset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
 test_data_loader = DataLoader(test_dataset, batch_size=1, collate_fn=collate_fn, shuffle=False)
 
 # 加载模型
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = MLP(len(vocab), embedding_dim, hidden_dim, num_class).to(device)
+model = CNN(len(vocab), embedding_dim, filter_size, num_filter, num_class).to(device)
 
 #训练过程
-nll_loss = nn.NLLLoss()
+nll_loss = nn.NLLLoss()  # 负对数似然损失，本质和交叉熵一样。
 optimizer = optim.Adam(model.parameters(), lr=0.001) # 使用Adam优化器
 
 model.train()
 for epoch in range(num_epoch):
     total_loss = 0
     for batch in tqdm(train_data_loader, desc=f'Training Epoch {epoch}'):
-        inputs, offsets, targets = [x.to(device) for x in batch]
-        log_probs = model(inputs, offsets)
+        inputs, targets = [x.to(device) for x in batch]
+        log_probs = model(inputs)
         loss = nll_loss(log_probs, targets)
         optimizer.zero_grad()
         loss.backward()
@@ -91,9 +101,9 @@ for epoch in range(num_epoch):
 # 测试过程
 acc = 0
 for batch in tqdm(test_data_loader, desc=f"Testing"):
-    inputs, offsets, targets = [x.to(device) for x in batch]
+    inputs, targets = [x.to(device) for x in batch]
     with torch.no_grad():
-        output = model(inputs, offsets)
+        output = model(inputs)
         acc += (output.argmax(dim=1) == targets).sum().item()
 
 # 输出在测试集上的准确率
