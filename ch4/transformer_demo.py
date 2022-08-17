@@ -68,17 +68,17 @@ class Transformer(nn.Module):
 
     def forward(self, inputs, lengths):
         inputs = torch.transpose(inputs, 0, 1)
-        print(f'transpose inputs: {inputs}')
+        # print(f'transpose inputs: {inputs}')
         hidden_states = self.embeddings(inputs)
-        print(f'embeddings: {hidden_states}')
+        # print(f'embeddings: {hidden_states}')
         hidden_states = self.positional_encoding(hidden_states)
-        print(f'positional_encoding: {hidden_states}')
+        # print(f'positional_encoding: {hidden_states}')
         attention_mask = length_to_mask(lengths) == False
-        print(f'attention_mask: {attention_mask}')
+        # print(f'attention_mask: {attention_mask}')
         hidden_states = self.transformer(hidden_states, src_key_padding_mask=attention_mask)  # encoder这个mask可以将padding的部分忽略掉，让attention的注意力机制不再参与这一部分的运算
-        print(f'transformer: {hidden_states}')
+        # print(f'transformer: {hidden_states}')
         hidden_states = hidden_states[0, :, :]  # hoho_todo: 为啥只要第一个维度？Bert?
-        print(f'hidden_states: {hidden_states}')
+        # print(f'hidden_states: {hidden_states}')
         output = self.output(hidden_states)
         log_probs = F.log_softmax(output, dim=1)
         return log_probs
