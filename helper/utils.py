@@ -1,6 +1,11 @@
 
 import torch
 from torch.utils.data import Dataset, DataLoader
+
+import os, sys
+dirpath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(dirpath)
+
 from helper.vocab import Vocab
 
 BOS_TOKEN = '<bos>'
@@ -95,3 +100,7 @@ def init_weights(model):
             torch.nn.init.uniform_(
                 param, a=-WEIGHT_INIT_RANGE, b=WEIGHT_INIT_RANGE
             )
+
+if __name__ == '__main__':
+    import nltk
+    nltk.download()
